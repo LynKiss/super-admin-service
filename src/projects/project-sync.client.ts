@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadGatewayException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac } from 'node:crypto';
 
@@ -56,12 +56,20 @@ export class ProjectSyncClient {
           typeof responsePayload === 'object' && responsePayload && 'message' in responsePayload
             ? responsePayload.message
             : `Project API failed with ${response.status}`;
-        throw new Error(message);
+        throw new BadGatewayException(
+          `Khong the dong bo voi backend du an (${response.status}): ${message}`,
+        );
       }
 
       return typeof responsePayload === 'object' && responsePayload && 'data' in responsePayload
         ? (responsePayload as ProjectApiEnvelope<T>).data
         : (responsePayload as T);
+    } catch (error) {
+      if (error instanceof BadGatewayException) throw error;
+      const message = error instanceof Error ? error.message : 'Unknown connection error';
+      throw new BadGatewayException(
+        `Khong the ket noi backend du an ${normalizedBaseUrl}. Hay kiem tra Base URL da deploy online va SUPER_ADMIN_SYNC_SECRET. Chi tiet: ${message}`,
+      );
     } finally {
       clearTimeout(timeout);
     }

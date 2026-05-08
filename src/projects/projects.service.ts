@@ -82,21 +82,23 @@ export class ProjectsService {
   async listProjectPermissions(projectId: string) {
     const project = await this.requireActiveProject(projectId);
     const secret = this.secretVault.decrypt(project.syncSecretCiphertext);
-    return this.projectSyncClient.get(
+    const permissions = await this.projectSyncClient.get<unknown[]>(
       project.baseUrl,
       secret,
       '/api/v1/internal/super-admin/permissions',
     );
+    return permissions.map((permission) => this.normalizePermission(permission));
   }
 
   async listProjectAdmins(projectId: string) {
     const project = await this.requireActiveProject(projectId);
     const secret = this.secretVault.decrypt(project.syncSecretCiphertext);
-    return this.projectSyncClient.get(
+    const admins = await this.projectSyncClient.get<unknown[]>(
       project.baseUrl,
       secret,
       '/api/v1/internal/super-admin/admins',
     );
+    return admins.map((admin) => this.normalizeProjectAdmin(admin));
   }
 
   async applyPermissions(
@@ -207,5 +209,66 @@ export class ProjectsService {
       updatedAt: timestampedProject.updatedAt,
       syncSecretConfigured: Boolean(project.syncSecretHash),
     };
+  }
+
+  private normalizePermission(input: unknown) {
+    const permission = (input ?? {}) as Record<string, unknown>;
+    const permissionId = this.toStringValue(
+      permission.permissionId ?? permission._id ?? permission.id ?? permission.key,
+    );
+    const permissionKey = this.toStringValue(permission.permissionKey ?? permission.key);
+    const permissionName = this.toStringValue(permission.permissionName ?? permission.name);
+
+    return {
+      permissionId,
+      permissionKey,
+      permissionName: permissionName || permissionKey,
+    };
+  }
+
+  private normalizeProjectAdmin(input: unknown) {
+    const admin = (input ?? {}) as Record<string, unknown>;
+    const rawPermissions = Array.isArray(admin.permissions) ? admin.permissions : [];
+    const rawPermissionKeys = Array.isArray(admin.permissionKeys)
+      ? admin.permissionKeys
+      : rawPermissions
+          .map((permission) => {
+            const item = (permission ?? {}) as Record<string, unknown>;
+            return this.toStringValue(item.permissionKey ?? item.key);
+          })
+          .filter(Boolean);
+
+    const userId = this.toStringValue(admin.userId ?? admin._id ?? admin.id);
+    const role = admin.role;
+    const normalizedRole =
+      typeof role === 'object' && role !== null
+        ? this.toStringValue((role as Record<string, unknown>).name ?? (role as Record<string, unknown>)._id)
+        : this.toStringValue(role);
+
+    return {
+      userId,
+      username: this.toStringValue(admin.username),
+      email: this.toStringValue(admin.email),
+      fullName: this.toNullableString(admin.fullName),
+      role: normalizedRole,
+      isActive: typeof admin.isActive === 'boolean' ? admin.isActive : true,
+      hasOverride:
+        typeof admin.hasOverride === 'boolean'
+          ? admin.hasOverride
+          : Array.isArray(admin.permissionKeys),
+      permissionKeys: Array.isArray(admin.permissionKeys)
+        ? rawPermissionKeys
+        : rawPermissions.length > 0
+          ? rawPermissionKeys
+          : null,
+    };
+  }
+
+  private toStringValue(value: unknown) {
+    return value === undefined || value === null ? '' : String(value);
+  }
+
+  private toNullableString(value: unknown) {
+    return value === undefined || value === null ? null : String(value);
   }
 }
